@@ -1,36 +1,28 @@
-#include <zephyr/kernel.h>             // Funções básicas do Zephyr (ex: k_msleep, k_thread, etc.)
-#include <zephyr/device.h>             // API para obter e utilizar dispositivos do sistema
-#include <zephyr/drivers/gpio.h>       // API para controle de pinos de entrada/saída (GPIO)
-#include <pwm_z42.h>                // Biblioteca personalizada com funções de controle do TPM (Timer/PWM Module)
+#include <zephyr/kernel.h>
+#include <zephyr/sys/printk.h>
+#include <padaria_p1.h>
+#include <padaria_p2.h>
+#include <padaria_p3.h>
 
-// Define o valor do registrador MOD do TPM para configurar o período do PWM
-#define TPM_MODULE 1000         // Define a frequência do PWM fpwm = (TPM_CLK / (TPM_MODULE * PS))
-// Valores de duty cycle correspondentes a diferentes larguras de pulso
-uint16_t duty_50  = TPM_MODULE/2;       // 50% de duty cycle (meio brilho)
+/*
+ * Selecione qual parte da atividade executar:
+ *   1 -> Parte 1: padeiro e cliente sem sincronizacao
+ *   2 -> Parte 2: padeiro e cliente com mutex
+ *   3 -> Parte 3: padeiro e cliente com semaforos (capacidade da vitrine)
+ */
+#define PADARIA_PARTE 1
 
 int main(void)
 {
-    // Inicializa o módulo TPM2 com:
-    // - base do TPMx
-    // - fonte de clock PLL/FLL (TPM_CLK)
-    // - valor do registrador MOD
-    // - tipo de clock (TPM_CLK)
-    // - prescaler de 1 a 128 (PS)
-    // - modo de operação EDGE_PWM
-    pwm_tpm_Init(TPM2, TPM_PLLFLL, TPM_MODULE, TPM_CLK, PS_128, EDGE_PWM);
-
-    // Inicializa o canal 0 do TPM2 para gerar sinal PWM na porta GPIOB_18
-    // - modo TPM_PWM_H (nível alto durante o pulso)
-    pwm_tpm_Ch_Init(TPM2, 0, TPM_PWM_H, GPIOB, 18);
-
-    // Define o valor do duty cycle: nesse caso, duty_100 (LED quase desligado)
-    pwm_tpm_CnV(TPM2, 0, duty_50);
-
-    // Loop infinito
-    for (;;)
-    {
-        // O programa poderia alterar o duty cycle dinamicamente aqui se desejado
-    }
+#if PADARIA_PARTE == 1
+    padaria_p1_start();
+#elif PADARIA_PARTE == 2
+    padaria_p2_start();
+#elif PADARIA_PARTE == 3
+    padaria_p3_start();
+#else
+#error "PADARIA_PARTE deve ser 1, 2 ou 3"
+#endif
 
     return 0;
 }
