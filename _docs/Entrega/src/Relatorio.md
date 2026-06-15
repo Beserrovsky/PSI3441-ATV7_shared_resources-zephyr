@@ -42,18 +42,37 @@ separada em `lib/`, selecionável em `src/main.c` através da constante `PADARIA
 - O cliente tenta retirar um pão a cada 1,5 segundos (`saldo_vitrine--`).
 - Nenhum mutex, semáforo ou fila é utilizado.
 
-**Perguntas de observação** *(responder após executar `PADARIA_PARTE 1` na placa)*:
+**Log obtido** (`logs/P1-COM8_2026_06_12.11.03.59.369.txt`):
+
+```
+=== Padaria - Parte 1 (sem sincronizacao) ===
+[Padeiro]  produziu pao  -> saldo_vitrine = 1
+[Cliente]  retirou pao  -> saldo_vitrine = 0
+[Padeiro]  produziu pao  -> saldo_vitrine = 1
+[Cliente]  retirou pao  -> saldo_vitrine = 0
+...
+[Padeiro]  produziu pao  -> saldo_vitrine = 20
+[Cliente]  retirou pao  -> saldo_vitrine = 19
+[Padeiro]  produziu pao  -> saldo_vitrine = 20
+[Cliente]  retirou pao  -> saldo_vitrine = 19
+[Padeiro]  produziu pao  -> saldo_vitrine = 20
+[Padeiro]  produziu pao  -> saldo_vitrine = 21
+[Cliente]  retirou pao  -> saldo_vitrine = 20
+[Padeiro]  produziu pao  -> saldo_vitrine = 21
+```
+
+**Perguntas de observação** *(executado com `PADARIA_PARTE 1`)*:
 
 1. O saldo da vitrine permanece consistente?
-   - _A preencher._
+   - Nesta execução sim: cada `produziu` aumenta o valor em 1 e cada `retirou` diminui em 1, sem saltos ou valores repetidos indevidamente. Isso ocorre porque o padeiro (1 s) e o cliente (1,5 s) raramente são escalonados no mesmo instante, então o `saldo_vitrine++`/`--` (que não é atômico — envolve load, soma/subtração e store) quase nunca é interrompido no meio. Essa consistência é, portanto, fruto da temporização escolhida, e não de uma garantia do código.
 2. O saldo pode se tornar negativo?
-   - _A preencher._
+   - Não, nesta execução. Como o padeiro produz mais rápido (1 s) do que o cliente consome (1,5 s), o saldo cresce continuamente (0→1→0→1→1→2→...→21) e nunca se aproxima de zero após o início, logo o cliente nunca encontra `saldo_vitrine == 0`.
 3. O comportamento muda ao alterar os tempos das threads?
-   - _A preencher._
+   - Sim. Se o intervalo do cliente fosse menor que o do padeiro (cliente mais rápido), o saldo tenderia a cair e poderia ficar negativo, já que o cliente sempre executa `saldo_vitrine--` sem verificar se há pão disponível. Além disso, com intervalos muito próximos (alta frequência de acesso), aumenta a chance real de as duas threads serem escalonadas exatamente durante a leitura/escrita de `saldo_vitrine`, gerando perda de atualizações (race condition).
 4. O comportamento muda ao alterar as prioridades das threads?
-   - _A preencher._
+   - No código atual ambas as threads têm a mesma prioridade (5) e cada uma libera a CPU ao chamar `k_sleep`/`k_msleep`, então a prioridade pouco influencia. Se uma das threads tivesse prioridade muito mais alta e um período de execução comparável, ela poderia preemptar a outra exatamente no meio do `saldo_vitrine++`/`--`, aumentando a probabilidade de inconsistências — mesmo que neste teste isso não tenha sido observado.
 5. Quais problemas podem ocorrer quando duas threads acessam a mesma variável simultaneamente?
-   - _A preencher._
+   - Condição de corrida (*race condition*): se as duas threads lerem o valor antigo de `saldo_vitrine` antes que a outra grave o novo valor, uma das atualizações é perdida (*lost update*). O valor final fica menor (ou maior) do que o esperado pela soma das produções e consumos, e o resultado passa a depender da ordem de escalonamento (comportamento não determinístico).
 
 ---
 
@@ -62,16 +81,29 @@ separada em `lib/`, selecionável em `src/main.c` através da constante `PADARIA
 Um mutex (`vitrine_mutex`) protege todo acesso (leitura e escrita) à variável
 `saldo_vitrine`, garantindo que o incremento/decremento seja uma operação atômica.
 
-**Perguntas de observação** *(responder após executar `PADARIA_PARTE 2` na placa)*:
+**Log obtido** (`logs/P2-COM8_2026_06_12.11.17.21.663.txt`):
+
+```
+=== Padaria - Parte 2 (com mutex) ===
+[Padeiro]  produziu pao  -> saldo_vitrine = 1
+[Cliente]  retirou pao  -> saldo_vitrine = 0
+[Padeiro]  produziu pao  -> saldo_vitrine = 1
+...
+[Padeiro]  produziu pao  -> saldo_vitrine = 20
+[Padeiro]  produziu pao  -> saldo_vitrine = 21
+[Cliente]  retirou pao  -> saldo_vitrine = 20
+```
+
+**Perguntas de observação** *(executado com `PADARIA_PARTE 2`)*:
 
 1. O mutex eliminou os problemas observados na Parte 1?
-   - _A preencher._
+   - O log da Parte 2 é praticamente idêntico ao da Parte 1 (mesma sequência de valores, mesmo crescimento de 0 até ~21), porque na Parte 1, nesta velocidade, o problema de race condition também não havia se manifestado visivelmente. O mutex elimina a *causa* do problema (garante que `saldo_vitrine++`/`--` seja atômico, sem leitura/escrita intercaladas), então o saldo continua numericamente correto mesmo que as threads sejam escalonadas em momentos críticos — algo que a Parte 1 não garantia.
 2. O mutex impede que o cliente retire pão de uma vitrine vazia?
-   - _A preencher._
+   - Não. O `cliente_thread` continua executando `saldo_vitrine--` incondicionalmente, apenas protegido pelo mutex — não há nenhuma verificação `if (saldo_vitrine > 0)`. Se o cliente fosse mais rápido que o padeiro, o saldo chegaria a 0 e o mutex permitiria, ainda assim, que `saldo_vitrine` se tornasse -1, -2, etc. O mutex garante apenas que a operação seja atômica, não que ela seja válida.
 3. Qual é exatamente o recurso protegido pelo mutex?
-   - _A preencher._
+   - A variável compartilhada `saldo_vitrine` — mais precisamente, a seção crítica que lê o valor atual, soma/subtrai 1 e grava o novo valor (incluindo o `printk` que o exibe).
 4. Qual é a principal função de um mutex neste problema?
-   - _A preencher._
+   - Garantir exclusão mútua: apenas uma thread por vez pode executar a seção crítica de leitura-modificação-escrita de `saldo_vitrine`, evitando que o padeiro e o cliente atualizem a variável "ao mesmo tempo" e causem perda de atualizações (*lost update*).
 
 ---
 
@@ -85,29 +117,47 @@ controlam a disponibilidade do recurso, além do mutex que protege `saldo_vitrin
 - `sem_espaco` (inicial 10, máx. 10): número de vagas livres na vitrine. O padeiro
   faz `k_sem_take(&sem_espaco)` antes de produzir — bloqueia se a vitrine estiver cheia.
 
-**Perguntas de observação** *(responder após executar `PADARIA_PARTE 3` na placa)*:
+**Log obtido** (`logs/P3-COM8_2026_06_12.11.22.55.992.txt`):
+
+```
+=== Padaria - Parte 3 (com semaforos, capacidade = 10) ===
+[Padeiro]  produziu pao  -> saldo_vitrine = 1
+[Cliente]  retirou pao  -> saldo_vitrine = 0
+...
+[Padeiro]  produziu pao  -> saldo_vitrine = 9
+[Padeiro]  produziu pao  -> saldo_vitrine = 10
+[Cliente]  retirou pao  -> saldo_vitrine = 9
+[Padeiro]  produziu pao  -> saldo_vitrine = 10
+[Cliente]  retirou pao  -> saldo_vitrine = 9
+[Padeiro]  produziu pao  -> saldo_vitrine = 10
+[Cliente]  retirou pao  -> saldo_vitrine = 9
+... (oscila indefinidamente entre 9 e 10)
+```
+
+**Perguntas de observação** *(executado com `PADARIA_PARTE 3`)*:
 
 1. O saldo pode se tornar negativo?
-   - _A preencher._
+   - Não. `sem_paes` é inicializado com 0, então o cliente bloqueia em `k_sem_take(&sem_paes, K_FOREVER)` sempre que não há pão produzido, só conseguindo decrementar `saldo_vitrine` depois que o padeiro sinalizar `k_sem_give(&sem_paes)`. No log, o valor mínimo observado é 0.
 2. O saldo pode ultrapassar a capacidade da vitrine?
-   - _A preencher._
+   - Não. `sem_espaco` é inicializado com `VITRINE_CAPACIDADE = 10`, então o padeiro bloqueia em `k_sem_take(&sem_espaco, K_FOREVER)` quando a vitrine está cheia. No log, depois que `saldo_vitrine` atinge 10, o padeiro passa a ficar bloqueado até o cliente retirar um pão (`k_sem_give(&sem_espaco)`), e o sistema entra em regime permanente oscilando apenas entre 9 e 10 — nunca chega a 11.
 3. Qual problema foi resolvido pelos semáforos que não era resolvido apenas pelo mutex?
-   - _A preencher._
+   - O controle de **disponibilidade/capacidade** do recurso. O mutex (Parte 2) só garantia que o acesso a `saldo_vitrine` fosse atômico, mas não impedia o cliente de retirar de uma vitrine vazia nem o padeiro de produzir além da capacidade. Os semáforos fazem as threads **bloquearem** (dormirem) até que a condição lógica (há pão / há espaço) seja satisfeita.
 4. Qual é o papel de cada semáforo utilizado?
-   - _A preencher._
+   - `sem_paes` (0..10): representa a quantidade de pães disponíveis na vitrine. O padeiro dá `k_sem_give` após produzir; o cliente faz `k_sem_take` antes de retirar (bloqueia se for 0).
+   - `sem_espaco` (0..10, inicia em 10): representa as vagas livres na vitrine. O cliente dá `k_sem_give` após retirar um pão; o padeiro faz `k_sem_take` antes de produzir (bloqueia se for 0, ou seja, vitrine cheia).
 
 ---
 
 ### Comparação
 
 1. Qual a diferença entre proteger um recurso e controlar sua disponibilidade?
-   - _A preencher._
+   - Proteger um recurso (mutex) significa garantir que o acesso à variável compartilhada seja exclusivo e atômico, evitando que duas threads leiam/escrevam o mesmo dado ao mesmo tempo e corrompam seu valor. Controlar a disponibilidade (semáforo) significa garantir que uma operação só ocorra quando existir quantidade suficiente do recurso (pão para retirar, espaço para produzir), bloqueando a thread até que essa condição seja verdadeira. Uma coisa é "o dado não pode ser corrompido"; outra é "a operação não pode ser realizada agora".
 2. Em qual parte da atividade o mutex foi suficiente?
-   - _A preencher._
+   - Na Parte 2, o mutex foi suficiente apenas para o objetivo restrito de proteger a consistência aritmética de `saldo_vitrine` (evitar *lost updates*). Ele não foi suficiente para impedir saldo negativo nem para limitar a capacidade da vitrine — esses problemas continuam presentes mesmo com o mutex.
 3. Em qual parte os semáforos se mostraram mais adequados?
-   - _A preencher._
+   - Na Parte 3, pois resolveram exatamente os problemas de disponibilidade/capacidade: o cliente nunca retira de uma vitrine vazia e o padeiro nunca excede a capacidade de 10 pães, como confirmado pelo log (oscilação estável entre 9 e 10).
 4. Se fosse necessário implementar uma padaria real, você utilizaria mutex, semáforos ou ambos? Justifique.
-   - _A preencher._
+   - Ambos, como na Parte 3. Os semáforos (`sem_paes`/`sem_espaco`) controlam a disponibilidade do recurso — bloqueando padeiro e cliente conforme a vitrine está vazia ou cheia — enquanto o mutex protege a atualização da variável `saldo_vitrine` em si, garantindo que a contagem permaneça correta mesmo quando ambas as condições de semáforo são satisfeitas "ao mesmo tempo". Usar apenas mutex não resolve o controle de disponibilidade, e usar apenas semáforos não garante, por si só, a atomicidade da leitura-modificação-escrita da variável compartilhada.
 
 ---
 
