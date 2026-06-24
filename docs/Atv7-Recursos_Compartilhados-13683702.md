@@ -419,5 +419,5 @@ void padaria_p3_start(void)
 ## Repositório
 
 ```text
-https://github.com/Beserrovsky/Atividade-7
+https://github.com/Beserrovsky/PSI3441-ATV7_shared_resources-zephyr
 ```
